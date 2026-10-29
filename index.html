@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f172a">
+<title>AG Pro — SU / GIÙ</title>
+<style>
+:root{--bg:#0b1020;--panel:#0f172a;--alt:#14213a;--border:#334155;--muted:#94a3b8;--text:#e2e8f0;--blue:#2563eb;--bull:#22c5a6;--bear:#f472b6;--warn:#ffc078}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{padding:calc(10px + env(safe-area-inset-top,0px)) 10px calc(18px + env(safe-area-inset-bottom,0px))}
+main{max-width:620px;margin:0 auto}
+h1{font-size:20px;margin:3px 0 4px}
+.sub{font-size:12px;color:var(--muted);line-height:1.5;margin-bottom:12px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:12px;margin:10px 0}
+label{display:block;color:var(--muted);font-size:12px;margin:0 0 5px}
+input,select,button{font:inherit;color:var(--text);background:#172033;border:1px solid #475569;border-radius:8px;min-height:42px;padding:8px;width:100%;min-width:0}
+button{background:var(--blue);border-color:var(--blue);font-weight:650}
+button:disabled{opacity:.55}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.actions{display:flex;gap:8px;margin-top:10px}
+.actions>*{flex:1}
+.card{background:var(--alt);border:1px solid #263750;border-radius:11px;padding:12px;min-width:0}
+.card h2{font-size:13px;margin:0 0 6px;color:var(--muted);font-weight:650}
+.big{font-size:26px;font-weight:800;overflow-wrap:anywhere}
+.small{font-size:11px;color:var(--muted);line-height:1.5;margin-top:5px}
+.up .big{color:var(--bull)}.down .big{color:var(--bear)}
+.k{font-size:11px;color:var(--muted)}.v{font-size:16px;font-weight:700;margin-top:4px}
+.status{font-size:12px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.status.error{color:var(--warn)}
+.note{font-size:11px;color:var(--muted);line-height:1.55}
+</style>
+</head>
+<body>
+<main>
+  <h1>AG Pro — SU / GIÙ</h1>
+  <div class="sub">Quanto deve muoversi il prezzo (in pp) perché il pace raggiunga la soglia ±0,40 ATR/barra: SU se sale, GIÙ se scende. Non è un segnale di acquisto o vendita.</div>
+
+  <section class="panel">
+    <div class="grid3">
+      <div><label for="symbol">Simbolo Yahoo</label><input id="symbol" value="QQQ" spellcheck="false" autocomplete="off" autocapitalize="characters"></div>
+      <div><label for="interval">Timeframe</label><select id="interval"><option value="1m">1 minuto</option><option value="5m" selected>5 minuti</option><option value="15m">15 minuti</option><option value="30m">30 minuti</option><option value="60m">1 ora</option><option value="1d">1 giorno</option></select></div>
+      <div><label for="refresh">Aggiorna</label><select id="refresh"><option value="10" selected>10 s</option><option value="30">30 s</option><option value="60">60 s</option><option value="0">Manuale</option></select></div>
+    </div>
+    <div class="actions"><button id="load">Carica dati</button><button id="stop" type="button">Ferma</button></div>
+  </section>
+
+  <section class="grid">
+    <div class="card up"><h2>SU</h2><div class="big" id="upDist">—</div><div class="small" id="upInfo">—</div></div>
+    <div class="card down"><h2>GIÙ</h2><div class="big" id="dnDist">—</div><div class="small" id="dnInfo">—</div></div>
+  </section>
+
+  <section class="panel">
+    <div class="grid3">
+      <div><div class="k">Prezzo</div><div class="v" id="price">—</div></div>
+      <div><div class="k">Pace</div><div class="v" id="pace">—</div></div>
+      <div><div class="k">ATR</div><div class="v" id="atr">—</div></div>
+    </div>
+  </section>
+
+  <div id="status" class="status">Pronto. Premi “Carica dati”.</div>
+  <section class="panel note">
+    <strong>Come si legge:</strong> 1 pp = 1 punto di prezzo (per QQQ, 1 dollaro); tra parentesi la stessa distanza in % del prezzo. Pace = (chiusura − chiusura di 10 barre prima) / (ATR14 × 10), mediato su 3 barre. «Manca X pp» è quanto dovrebbe spostarsi la chiusura della barra in corso perché la media a 3 barre del pace arrivi a ±0,40. È una stima con l'ATR tenuto fisso: se il movimento è ampio l'ATR cresce e la distanza vera è un po' maggiore. «Raggiunta» significa soglia già superata; «tenuta k/3» conta le barre consecutive che la superano (ne servono 3). Yahoo può dare dati ritardati.
+  </section>
+</main>
+<script>
+'use strict';
+const PROXY='https://yahooproxy.b864v27974.workers.dev';
+const LOOKBACK=10,ATRLEN=14,SMLEN=3,THR=0.40,HOLD=3,MINBARS=ATRLEN+LOOKBACK+SMLEN;
+const RANGE={'1m':'5d','5m':'5d','15m':'5d','30m':'1mo','60m':'1mo','1d':'6mo'};
+const STEP={'1m':60,'5m':300,'15m':900,'30m':1800,'60m':3600,'1d':86400};
+const $=id=>document.getElementById(id);
+let controller=null,timer=null,stopped=false,prev=null,lastOk=null;
+
+const fmt=(v,d=2)=>Number.isFinite(v)?v.toLocaleString('it-IT',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const hms=ms=>new Date(ms).toLocaleTimeString('it-IT',{timeZone:'Europe/Rome'});
+const hmsDay=ms=>new Date(ms).toLocaleString('it-IT',{timeZone:'Europe/Rome',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+// ---------- dati Yahoo (stesso Worker, tre metodi di richiesta) ----------
+function parseYahoo(data){
+  const r=data?.chart?.result?.[0]||data?.result?.[0]||data;
+  const q=r?.indicators?.quote?.[0],ts=r?.timestamp;
+  if(!q||!ts)throw new Error(data?.chart?.error?.description||'Formato Yahoo non riconosciuto');
+  const out=[];
+  for(let i=0;i<ts.length;i++){
+    if(![ts[i],q.open?.[i],q.high?.[i],q.low?.[i],q.close?.[i]].every(Number.isFinite))continue; // barre vuote: scartate, mai inventate
+    if(q.high[i]<q.low[i])continue;
+    out.push({time:ts[i]*1000,open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i]});
+  }
+  out.sort((a,b)=>a.time-b.time);
+  const bars=out.filter((b,i)=>!i||b.time!==out[i-1].time);
+  const reg=r?.meta?.currentTradingPeriod?.regular;
+  bars.reg=Number.isFinite(reg?.start)&&Number.isFinite(reg?.end)?{start:reg.start*1000,end:reg.end*1000}:null;
+  bars.dups=out.length-bars.length;
+  return bars;
+}
+async function fetchBars(signal){
+  const symbol=$('symbol').value.trim().toUpperCase();
+  if(!symbol)throw new Error('Inserisci un simbolo, per esempio QQQ o NQ=F.');
+  const interval=$('interval').value,range=RANGE[interval];
+  const path='/v8/finance/chart/'+encodeURIComponent(symbol)+'?interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range);
+  const urls=[PROXY+path,PROXY+'/?url='+encodeURIComponent('https://query1.finance.yahoo.com'+path),PROXY+'/?symbol='+encodeURIComponent(symbol)+'&interval='+encodeURIComponent(interval)+'&range='+encodeURIComponent(range)];
+  let err;
+  for(const url of urls){
+    const ac=new AbortController(),abort=()=>ac.abort(),to=setTimeout(()=>ac.abort(),12000);
+    signal.addEventListener('abort',abort,{once:true});
+    try{
+      const res=await fetch(url,{cache:'no-store',signal:ac.signal});
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      const bars=parseYahoo(await res.json());
+      if(bars.length<MINBARS)throw new Error('Yahoo ha restituito solo '+bars.length+' barre valide (ne servono '+MINBARS+').');
+      return bars;
+    }catch(e){if(signal.aborted)throw e;err=e.name==='AbortError'?new Error('Timeout Yahoo'):e}
+    finally{clearTimeout(to);signal.removeEventListener('abort',abort)}
+  }
+  throw err||new Error('Impossibile caricare i dati');
+}
+
+// ---------- calcolo ----------
+const trOf=(b,pc)=>pc===undefined?b.high-b.low:Math.max(b.high-b.low,Math.abs(b.high-pc),Math.abs(b.low-pc));
+// ATR di Wilder (RMA): null finché non ci sono ATRLEN barre
+function atrSeries(bars){
+  const out=Array(bars.length).fill(null),tr=bars.map((b,i)=>trOf(b,i?bars[i-1].close:undefined));
+  let a=null;
+  for(let i=0;i<bars.length;i++){
+    if(i<ATRLEN-1)continue;
+    if(i===ATRLEN-1){let s=0;for(let j=0;j<ATRLEN;j++)s+=tr[j];a=s/ATRLEN}
+    else a=(a*(ATRLEN-1)+tr[i])/ATRLEN;
+    out[i]=a;
+  }
+  return {atr:out,tr};
+}
+// pace[i] = (close[i] - close[i-10]) / (ATR[i] * 10); prima dell'ATR completo si usa il TR della barra
+function paceSeries(bars){
+  const {atr,tr}=atrSeries(bars);
+  const pace=bars.map((b,i)=>{const a=atr[i]??tr[i];return i>=LOOKBACK&&a>0?(b.close-bars[i-LOOKBACK].close)/(a*LOOKBACK):0});
+  const sm=pace.map((_,i)=>i<SMLEN-1?null:(pace[i]+pace[i-1]+pace[i-2])/SMLEN);
+  return {atr,pace,sm};
+}
+// Distanza (>=0) dalla chiusura attuale alla chiusura della barra in corso che porta la media a 3 barre del pace a +THR (dir=+1) o -THR (dir=-1).
+// Stima con ATR tenuto fisso al valore attuale: serve pace_barra = dir*THR*3 - pace[i-1] - pace[i-2], quindi chiusura = chiusura[i-10] + pace_barra*ATR*10.
+// 0 = soglia già superata. null = ATR nullo (serie ferma), calcolo impossibile.
+function distanceTo(bars,s,dir){
+  const i=bars.length-1,a=s.atr[i],c=bars[i].close;
+  if(!(a>0))return null;
+  const need=dir*THR*SMLEN-s.pace[i-1]-s.pace[i-2];
+  return Math.max(0,dir*(bars[i-LOOKBACK].close+need*a*LOOKBACK-c));
+}
+function holdCount(sm,dir){let k=0;for(let j=sm.length-1;j>=0&&sm[j]!==null&&(dir>0?sm[j]>THR:sm[j]<-THR);j--)k++;return k}
+function analyze(bars){
+  if(!bars||bars.length<MINBARS)return null;
+  const s=paceSeries(bars),i=bars.length-1,c=bars[i].close;
+  const up=distanceTo(bars,s,1),dn=distanceTo(bars,s,-1);
+  return {close:c,pace:s.sm[i],atr:s.atr[i],up,dn,upHold:holdCount(s.sm,1),dnHold:holdCount(s.sm,-1)};
+}
+
+// ---------- interfaccia ----------
+function cardText(dist,hold,c,dir,atr){
+  if(dist===null)return {big:'—',info:'ATR nullo: calcolo non possibile'};
+  if(dist===0)return {big:'Raggiunta',info:'Soglia già superata · tenuta '+Math.min(hold,HOLD)+'/'+HOLD+' barre'};
+  const lvl=c+dir*dist;
+  return {big:(dir>0?'+':'−')+fmt(dist)+' pp',info:'('+fmt(dist/c*100)+'%) · livello '+fmt(lvl)+' · tenuta '+Math.min(hold,HOLD)+'/'+HOLD+(dist>3*atr?' · stima poco precisa (oltre 3 ATR)':'')};
+}
+function setStatus(t,warn){$('status').className='status'+(warn?' error':'');$('status').textContent=t}
+function freshness(bars,cur){
+  const interval=$('interval').value,last=bars[bars.length-1],now=Date.now(),age=now-last.time;
+  const open=bars.reg?now>=bars.reg.start&&now<bars.reg.end:null;
+  let txt,warn=false;
+  if(open===false)txt='mercato chiuso';
+  else if(interval!=='1d'&&open===true&&age>2*STEP[interval]*1000+60000){txt='⚠ dato non aggiornato da '+Math.round(age/60000)+' min';warn=true}
+  else if(prev&&prev.t===last.time)txt=prev.c===cur?'nessuna nuova barra, prezzo invariato':'barra in corso aggiornata';
+  else txt=prev?'nuova barra':'dati caricati';
+  prev={t:last.time,c:cur};
+  return {txt,warn};
+}
+function render(bars){
+  const r=analyze(bars);
+  if(!r)throw new Error('Dati insufficienti');
+  const u=cardText(r.up,r.upHold,r.close,1,r.atr),d=cardText(r.dn,r.dnHold,r.close,-1,r.atr);
+  $('upDist').textContent=u.big;$('upInfo').textContent=u.info;
+  $('dnDist').textContent=d.big;$('dnInfo').textContent=d.info;
+  $('price').textContent=fmt(r.close);
+  $('pace').textContent=(r.pace>=0?'+':'')+fmt(r.pace,3);
+  $('atr').textContent=fmt(r.atr,3);
+  const f=freshness(bars,r.close);lastOk=hms(Date.now());
+  const dup=bars.dups?' · '+bars.dups+' duplicati scartati':'';
+  setStatus($('symbol').value.trim().toUpperCase()+' · '+bars.length+' barre · ultima barra '+hmsDay(bars[bars.length-1].time)+' · '+f.txt+dup+' · aggiornato '+lastOk+' (ora italiana)',f.warn);
+}
+async function load(){
+  clearTimeout(timer);
+  if(controller)controller.abort();
+  controller=new AbortController();const signal=controller.signal;
+  $('load').disabled=true;
+  try{
+    const bars=await fetchBars(signal);if(signal.aborted)return;
+    render(bars);
+  }catch(e){
+    if(signal.aborted)return;
+    setStatus('Errore: '+(e?.message||e)+' — riprovo'+(lastOk?' · i valori mostrati sono delle '+lastOk:''),true);
+  }finally{
+    if(controller&&controller.signal===signal){$('load').disabled=false;schedule()}
+  }
+}
+function schedule(){
+  clearTimeout(timer);const sec=Number($('refresh').value);
+  if(!stopped&&sec>0&&!document.hidden)timer=setTimeout(load,sec*1000);
+}
+$('load').addEventListener('click',()=>{stopped=false;prev=null;load()});
+$('stop').addEventListener('click',()=>{stopped=true;clearTimeout(timer);if(controller)controller.abort();controller=null;$('load').disabled=false;setStatus('Aggiornamento automatico fermato.')});
+$('refresh').addEventListener('change',()=>{stopped=false;schedule()});
+$('interval').addEventListener('change',()=>{prev=null});
+$('symbol').addEventListener('change',()=>{prev=null});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){clearTimeout(timer);if(controller)controller.abort();controller=null;$('load').disabled=false}
+  else if(!stopped&&Number($('refresh').value)>0&&lastOk)load();
+});
+</script>
+</body>
+</html>
